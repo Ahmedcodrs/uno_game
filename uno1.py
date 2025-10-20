@@ -1,5 +1,6 @@
 import pygame
 import sys
+import uno2
 pygame.init()
 
 #this is the window specs,captions and clock
@@ -80,6 +81,8 @@ while running:
                 if username.strip():
                     print("Username:", username.strip())  # replace with lobby transition, not done till now will add with mysql connectivity 
                     running = False
+                    pygame.quit()
+                    uno2.startlobby(username.strip())
             elif event.key == pygame.K_BACKSPACE:
                 if username:
                     username = username[:-1]
@@ -91,3 +94,4 @@ while running:
     redrawgamewin()
 
 pygame.quit()
+
