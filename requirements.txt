@@ -1,2 +1,5 @@
 pygame
 socket
+random
+sys
+pickle
