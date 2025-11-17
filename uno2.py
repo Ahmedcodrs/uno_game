@@ -1,8 +1,8 @@
 import pygame
-import sys
-
-def startlobby(username):
-    pygame.init()
+import socket
+import time
+import pickle
+def startlobby(username,network):
 
     #window
     width,height=1280,720
@@ -10,9 +10,7 @@ def startlobby(username):
     pygame.display.set_caption("UNO-Matchmaking Lobby")
     clock=pygame.time.Clock()
 
-
     #font
-    
     titlefont = pygame.font.SysFont("Arial", 60, bold=True)
     namefont  = pygame.font.SysFont("Arial", 40, bold=True)
     smallfont = pygame.font.SysFont("Arial", 30)
@@ -29,16 +27,19 @@ def startlobby(username):
     hslot=hbox//4
 
     #player data
-    players=[{"name":username,"ready":False,}]
+    players=[]
     maxplayers=4
 
     #ready button
     readyrect=pygame.Rect((width-400)//2,height-150,400,80)
     pygame.key.set_repeat(350,40)
+    last_update = 0
+
+
 
 
     #aloo ke parathe are tasty nom nom nom and draw
-    def redraw():
+    def redraw(players, your_index):
         win.fill((0,100,0))
         win.blit(titletext,titlerect)
 
@@ -57,7 +58,7 @@ def startlobby(username):
                 p = players[i]
 
                 # player name
-                namesurf = namefont.render(p["name"], True, (255, 255, 255))
+                namesurf = namefont.render(p["username"], True, (255, 255, 255))
                 win.blit(namesurf, (xbox + 12, slottop + (hslot - namesurf.get_height()) // 2))
 
                 # ready status
@@ -87,14 +88,23 @@ def startlobby(username):
         countersurf = smallfont.render(f"Players Ready: {readycount}/{totalplayers}", True, (255, 255, 0))
         win.blit(countersurf, (width // 2 - countersurf.get_width() // 2, ybox + hbox + 12))
 
+
+
+
         # ready button display
-        playerready = players[0]["ready"]
-        if playerready == True:
-            btncolor = (120, 120, 120)
-            label = "Press ENTER to Unready"
+        #and checks your_index which is like a roll number for using within this function
+        if your_index is not None:
+            playerready = players[your_index]["ready"]
+            if playerready == True:
+                btncolor = (120, 120, 120)
+                label = "Press ENTER to Unready"
+            else:
+                btncolor = (0, 200, 0)
+                label = "Press ENTER to Ready"
         else:
-            btncolor = (0, 200, 0)
-            label = "Press ENTER to Ready"
+            # You're not in the list yet
+            btncolor = (100, 100, 100)
+            label = "Connecting..."
 
         pygame.draw.rect(win, btncolor, readyrect, border_radius=10)
         labelsurf = namefont.render(label, True, (255, 255, 255))
@@ -104,14 +114,30 @@ def startlobby(username):
 
                 
 
-        
-    
+
+
 
     
     # Main loop
     running = True
+
     while running:
         clock.tick(60)
+        #read from shared state
+        players = network.players.copy()
+
+        #check for game started
+        if network.game_started:
+            print("Game starting")
+            running = False
+            break
+
+        #find index
+        your_index = None
+        for i, p in enumerate(players):
+            if p.get("username") == username:
+                your_index = i
+                break
 
         #Event handling
         for event in pygame.event.get():
@@ -125,11 +151,19 @@ def startlobby(username):
 
 
                 elif event.key==pygame.K_RETURN:
-                    players[0]["ready"] = not players[0]["ready"]
+                    if your_index is not None:
+                        #send action enough
+                        network.send_action("toggle_ready")
+                        print("sent toggle_ready")
 
-        redraw()
+
+
+        redraw(players,your_index)
 
     pygame.quit()
+
+
+
 
 
 
