@@ -1,6 +1,4 @@
 import pygame
-import sys
-import uno2
 pygame.init()
 
 #this is the window specs,captions and clock
@@ -26,15 +24,14 @@ def title():
     textrect.top = 10
 
 #keeps drawing the bg and title 
-def redrawgamewin():
+def redrawgamewin(username):
     win.fill((0, 100, 0))
-    pygame.draw.rect(win, (128, 128, 128), textboxrect, 6) 
+    pygame.draw.rect(win, (128, 128, 128), textboxrect, 6)
     win.blit(textsurface, textrect)
-    
 
-    #FOR THE USERNAME ENTER TITLE
+    # FOR THE USERNAME ENTER TITLE
     win.blit(promptsurf, promptrect)
-    pygame.draw.rect(win, (40, 40, 40), inputrect)        
+    pygame.draw.rect(win, (40, 40, 40), inputrect)
     pygame.draw.rect(win, (200, 200, 200), inputrect, 3)
     textsurf = inputfont.render(username, True, (255, 255, 255))
     win.blit(textsurf, (inputrect.x + 12, inputrect.y + (inputrect.height - textsurf.get_height()) // 2))
@@ -65,33 +62,35 @@ pygame.key.set_repeat(350, 40)
 
 
 # main loop
-running = True
-while running:
-    clock.tick(60) 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-
-
-        #this is the keyboard press event where it registers the key and fucntions acc to that
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
+def username_screen():
+    running = True
+    username = ''
+    while running:
+        clock.tick(60)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
                 running = False
-            elif event.key == pygame.K_RETURN:
-                if username.strip():
-                    print("Username:", username.strip())  # replace with lobby transition, not done till now will add with mysql connectivity 
+
+
+            #this is the keyboard press event where it registers the key and fucntions acc to that
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
                     running = False
-                    pygame.quit()
-                    uno2.startlobby(username.strip())
-            elif event.key == pygame.K_BACKSPACE:
-                if username:
-                    username = username[:-1]
-            else:
-                ch = event.unicode
-                if ch and len(username) < maxlen and (ch.isalnum() or ch in "_-"):
-                    username += ch
+                elif event.key == pygame.K_RETURN:
+                    if username.strip():
+                        print("Username:", username.strip())  # replace with lobby transition, not done till now will add with mysql connectivity
+                        return username
 
-    redrawgamewin()
 
-pygame.quit()
+                elif event.key == pygame.K_BACKSPACE:
+                    if username:
+                        username = username[:-1]
+                else:
+                    ch = event.unicode
+                    if ch and len(username) < maxlen and (ch.isalnum() or ch in "_-"):
+                        username += ch
+
+        redrawgamewin(username)
+
+    pygame.quit()
 
