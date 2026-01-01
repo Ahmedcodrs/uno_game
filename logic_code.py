@@ -1,12 +1,38 @@
-import random
-import sys
 
+
+import random
+
+
+# ==================== CARD CLASS ====================
 class Card:
     def __init__(self, color, value):
-        self.color = color
-        self.value = value
-    def __str__(self): return f"{self.color} {self.value}"
-    def __repr__(self): return f"Card('{self.color}', '{self.value}')"
+        self.color = color  # "Red", "Green", "Blue", "Yellow", "Wild"
+        self.value = value  # "0"-"9", "Skip", "Reverse", "Draw 2", "Wild", "Wild Draw 4"
+
+    def __str__(self):
+        return f"{self.color} {self.value}"
+
+    def __repr__(self):
+        return f"Card('{self.color}', '{self.value}')"
+
+    # NEW: Convert card to dictionary for sending over network
+    def to_dict(self):
+        """
+        Converts card to a dictionary that can be sent over network
+        Example: Card("Red", "5") → {"color": "Red", "value": "5"}
+        """
+        return {
+            "color": self.color,
+            "value": self.value
+        }
+
+    # NEW: Recreate card from dictionary received over network
+    @staticmethod
+    def from_dict(data):
+
+        return Card(data["color"], data["value"])
+
+
 
 class Deck:
     def __init__(self):
@@ -14,58 +40,105 @@ class Deck:
         self.build()
 
     def build(self):
+        """Create all 108 UNO cards"""
         colors = ["Red", "Green", "Blue", "Yellow"]
         self.cards = []
-        for color in colors:
-            self.cards.append(Card(color, "0"))
-            for i in range(1, 10): self.cards.extend([Card(color, str(i))] * 2)
-            for action in ["Skip", "Reverse", "Draw 2"]: self.cards.extend([Card(color, action)] * 2)
 
+        for color in colors:
+            # One 0 card per color
+            self.cards.append(Card(color, "0"))
+            # Two of each 1-9
+            for i in range(1, 10):
+                self.cards.extend([Card(color, str(i))] * 2)
+            # Two of each action card
+            for action in ["Skip", "Reverse", "Draw 2"]:
+                self.cards.extend([Card(color, action)] * 2)
+
+        # Add Wild cards
         self.cards.extend([Card("Wild", "Wild")] * 4)
         self.cards.extend([Card("Wild", "Wild Draw 4")] * 4)
 
-    def shuffle(self): random.shuffle(self.cards)
+    def shuffle(self):
+        random.shuffle(self.cards)
 
     def draw_card(self):
+
         if not self.cards:
-            print("Deck empty!")
             return None
         return self.cards.pop()
 
+    def reshuffle_from_discard(self, discard_pile):
+
+        if len(discard_pile) > 1:
+            top_card = discard_pile[-1]  # Keep top card
+            self.cards = discard_pile[:-1]  # Everything else goes to deck
+            self.shuffle()
+            return [top_card]  # New discard pile with just top card
+        return discard_pile
+
+
+
 class Player:
-    def __init__(self, name):
+    def __init__(self, name, player_id):
         self.name = name
+        self.player_id = player_id  # NEW: Each player has an ID (0, 1, 2, 3)
         self.hand = []
+        self.called_uno = False
 
     def draw(self, deck):
+        """Draw a card and add to hand"""
         card = deck.draw_card()
-        if card: self.hand.append(card)
+        if card:
+            self.hand.append(card)
         return card
 
-    def show_hand(self):
-        print(f"\n--- {self.name}'s Hand ---")
-        for i, card in enumerate(self.hand): print(f"  {i}: {card}")
-        print("-" * (len(self.name) + 14))
 
-class Game:
+    def to_dict(self):
+
+        return {
+            "name": self.name,
+            "player_id": self.player_id,
+            "card_count": len(self.hand),
+            "called_uno": self.called_uno
+        }
+
+
+# ==================== MAIN GAME CLASS ====================
+class UNOGame:
+
     def __init__(self, player_names):
+
         self.deck = Deck()
         self.deck.shuffle()
         self.discard_pile = []
-        self.players = [Player(name) for name in player_names]
-        self.current_player_index = 0
-        self.game_direction = 1
-        self.current_color = ""
 
+        # Create players with IDs
+        self.players = [Player(name, i) for i, name in enumerate(player_names)]
+
+        self.current_player_index = 0  # Whose turn (0, 1, 2, 3)
+        self.game_direction = 1  # 1 = clockwise, -1 = counter-clockwise
+        self.current_color = ""  # Current color in play
+
+        # NEW: Game state flags
+        self.game_over = False
+        self.winner = None
+        self.last_action = ""  # Description of last thing that happened
+
+        # Setup game
         self.deal_initial_cards()
         self.start_game()
 
     def deal_initial_cards(self, num_cards=7):
+
         for player in self.players:
-            for _ in range(num_cards): player.draw(self.deck)
+            for _ in range(num_cards):
+                player.draw(self.deck)
 
     def start_game(self):
+
         first_card = self.deck.draw_card()
+
+        # Keep drawing until we don't get Wild Draw 4
         while first_card and first_card.value == "Wild Draw 4":
             self.deck.cards.append(first_card)
             self.deck.shuffle()
@@ -74,114 +147,272 @@ class Game:
         if first_card:
             self.discard_pile.append(first_card)
             self.current_color = first_card.color
-            print(f"Game started! Top: {first_card}")
+            self.last_action = f"Game started! Top card: {first_card}"
+
+            # Apply effect of first card (if it's Skip, Reverse, etc.)
             self.apply_card_effect(first_card, is_first_card=True)
 
-    def get_current_player(self): return self.players[self.current_player_index]
+    def get_current_player(self):
+
+        return self.players[self.current_player_index]
 
     def next_turn(self):
+
         self.current_player_index = (self.current_player_index + self.game_direction) % len(self.players)
 
     def is_valid_play(self, card):
-        top_card = self.discard_pile[-1]
-        return card.color == "Wild" or card.color == self.current_color or card.value == top_card.value
 
-    def play_card(self, player, card_index, chosen_color=None):
-        if not (0 <= card_index < len(player.hand)): 
+        if not self.discard_pile:
             return False
+
+        top_card = self.discard_pile[-1]
+
+        return (
+                card.color == "Wild" or  # Wild cards can always be played
+                card.color == self.current_color or  # Match color
+                card.value == top_card.value  # Match number/action
+        )
+
+    def call_uno(self, player_id):
+        """
+        Player calls UNO when they have 1 card left
+        Returns result dict
+        """
+        player = self.players[player_id]
+
+        # Check if player has exactly 1 card
+        if len(player.hand) == 1:
+            player.called_uno = True
+            self.last_action = f"{player.name} called UNO!"
+            return {
+                "success": True,
+                "message": f"{player.name} called UNO!",
+                "called_uno": True
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Can only call UNO with 1 card",
+                "message": f"{player.name} has {len(player.hand)} cards"
+            }
+
+    def check_uno_penalty(self, player_id):
+        """
+        Check if player should be penalized for not calling UNO
+        Called after a player plays a card
+        """
+        player = self.players[player_id]
+
+        # If player has 1 card but didn't call UNO
+        if len(player.hand) == 1 and not player.called_uno:
+            # Penalty: draw 2 cards
+            for _ in range(2):
+                player.draw(self.deck)
+            self.last_action = f"{player.name} forgot to call UNO! Drew 2 cards as penalty."
+            return {
+                "penalty": True,
+                "message": f"{player.name} penalized for not calling UNO"
+            }
+
+        return {"penalty": False}
+
+    def play_card(self, player_id, card_index, chosen_color=None):
+        player = self.players[player_id]
+
+        # VALIDATION 1: Check if valid card index
+        if not (0 <= card_index < len(player.hand)):
+            return {
+                "success": False,
+                "error": "Invalid card index",
+                "message": f"Card index {card_index} out of range"
+            }
+
+        # VALIDATION 2: Check if it's this player's turn
+        if self.current_player_index != player_id:
+            return {
+                "success": False,
+                "error": "Not your turn",
+                "message": f"It's {self.get_current_player().name}'s turn"
+            }
+
         card_to_play = player.hand[card_index]
 
-        if self.is_valid_play(card_to_play):
-            player.hand.pop(card_index)
-            self.discard_pile.append(card_to_play)
-            
-            self.current_color = chosen_color if card_to_play.color == "Wild" else card_to_play.color
-            if card_to_play.color == "Wild" and not chosen_color: 
-                print("Defaulting to Red.")
+        # VALIDATION 3: Check if card can be played
+        if not self.is_valid_play(card_to_play):
+            return {
+                "success": False,
+                "error": "Invalid card",
+                "message": f"Cannot play {card_to_play} on {self.discard_pile[-1]}"
+            }
 
-            print(f"{player.name} played {card_to_play}.")
 
-            if not player.hand:
-                self.end_game(player)
-                return True
 
-            self.apply_card_effect(card_to_play)
-            self.next_turn()
+        # Remove from hand
+        player.hand.pop(card_index)
 
-            return True
+        # Add to discard pile
+        self.discard_pile.append(card_to_play)
+
+        # Handle Wild card color choice
+        if card_to_play.color == "Wild":
+            if chosen_color and chosen_color in ["Red", "Green", "Blue", "Yellow"]:
+                self.current_color = chosen_color
+            else:
+                self.current_color = "Red"  # Default
         else:
-            print(f"Invalid play.")
-            return False
+            self.current_color = card_to_play.color
+
+        self.last_action = f"{player.name} played {card_to_play}"
+
+        # Check for win (player has no cards left)
+        if not player.hand:
+            self.game_over = True
+            self.winner = player
+            return {
+                "success": True,
+                "card_played": card_to_play.to_dict(),
+                "current_color": self.current_color,
+                "game_over": True,
+                "winner": player.name,
+                "message": f"{player.name} wins!"
+            }
+
+        # Apply card effects (Skip, Reverse, Draw 2, etc.)
+        effect_msg = self.apply_card_effect(card_to_play)
+        if len(player.hand) != 1:
+            player.called_uno = False
+        # Move to next turn
+        self.next_turn()
+
+        # Return result
+        return {
+            "success": True,
+            "card_played": card_to_play.to_dict(),
+            "current_color": self.current_color,
+            "next_player": self.current_player_index,
+            "effect": effect_msg,
+            "game_over": False,
+            "message": f"{player.name} played {card_to_play}"
+        }
+
+    def draw_card_action(self, player_id):
+
+
+        if self.current_player_index != player_id:
+            return {
+                "success": False,
+                "error": "Not your turn"
+            }
+
+        player = self.players[player_id]
+
+        # Check if deck is empty
+        if not self.deck.cards:
+            self.discard_pile = self.deck.reshuffle_from_discard(self.discard_pile)
+
+        drawn_card = player.draw(self.deck)
+
+        if not drawn_card:
+            # Deck still empty even after reshuffle
+            self.last_action = f"{player.name} tried to draw but deck empty"
+            self.next_turn()
+            return {
+                "success": True,
+                "drew_card": False,
+                "next_player": self.current_player_index,
+                "message": "Deck empty, turn skipped"
+            }
+
+        self.last_action = f"{player.name} drew a card"
+
+        # Check if drawn card can be played
+        can_play = self.is_valid_play(drawn_card)
+
+        if can_play:
+            # Automatically play it if possible
+            card_index = len(player.hand) - 1
+            chosen_color = None
+            if drawn_card.color == "Wild":
+                chosen_color = random.choice(["Red", "Green", "Blue", "Yellow"])
+
+            # Play the drawn card
+            return self.play_card(player_id, card_index, chosen_color)
+        else:
+            # Can't play, skip turn
+            self.next_turn()
+            return {
+                "success": True,
+                "drew_card": True,
+                "can_play": False,
+                "next_player": self.current_player_index,
+                "message": f"{player.name} drew a card but cannot play"
+            }
 
     def apply_card_effect(self, card, is_first_card=False):
+
+        effect = ""
+
         if card.value == "Skip":
-            print("Skipped!")
+            skipped_player = self.players[(self.current_player_index + self.game_direction) % len(self.players)]
+            effect = f"{skipped_player.name} is skipped!"
             self.next_turn()
+
         elif card.value == "Reverse":
-            print("Reversed!")
             self.game_direction *= -1
-            if len(self.players) == 2 and not is_first_card: self.next_turn()
+            effect = "Direction reversed!"
+            # In 2-player game, Reverse acts like Skip
+            if len(self.players) == 2 and not is_first_card:
+                self.next_turn()
+
         elif card.value == "Draw 2":
             target = self.players[(self.current_player_index + self.game_direction) % len(self.players)]
-            print(f"{target.name} draws 2 and is skipped!")
-            for _ in range(2): target.draw(self.deck)
+            for _ in range(2):
+                target.draw(self.deck)
+            effect = f"{target.name} draws 2 cards and is skipped!"
             self.next_turn()
+
         elif card.value == "Wild Draw 4":
             target = self.players[(self.current_player_index + self.game_direction) % len(self.players)]
-            print(f"{target.name} draws 4 and is skipped!")
-            for _ in range(4): target.draw(self.deck)
+            for _ in range(4):
+                target.draw(self.deck)
+            effect = f"{target.name} draws 4 cards and is skipped!"
             self.next_turn()
-    
-    def end_game(self, winner):
-        print("\n" + "="*30)
-        print(f"GAME OVER! Winner: {winner.name}!")
-        print("="*30 + "\n")
-        sys.exit()
 
-if __name__ == "__main__":
-    player_names = ["Kittu omega", "Kittu supreme","rohan"]
-    game = Game(player_names)
+        if effect:
+            self.last_action += f" - {effect}"
 
-    while True:
-        current_player = game.get_current_player()
-        top_card = game.discard_pile[-1]
-        print(f"\n{'*'*40}\nTop card: {top_card} ({game.current_color})")
-        current_player.show_hand()
+        return effect
 
-        playable = [i for i, card in enumerate(current_player.hand) if game.is_valid_play(card)]
+    # ==================== GET GAME STATE ====================
+    def get_game_state(self, for_player_id=None):
 
-        if not playable:
-            drawn_card = current_player.draw(game.deck)
-            print(f"{current_player.name} drew {drawn_card}.")
-            
-            if game.is_valid_play(drawn_card):
-                idx = len(current_player.hand) - 1
-                color = random.choice(["Red", "Green", "Blue", "Yellow"]) if drawn_card.color == "Wild" else None
-                game.play_card(current_player, idx, color)
-            else:
-                print("Cannot play drawn card. Skipped.")
-                game.next_turn()
-            continue
 
-        try:
-            choice = input(f"{current_player.name}, card (0-{len(current_player.hand)-1}) or 'draw': ")
-            
-            if choice.lower() == 'draw':
-                current_player.draw(game.deck)
-                game.next_turn()
-                continue
+        state = {
+            "top_card": self.discard_pile[-1].to_dict() if self.discard_pile else None,
+            "current_color": self.current_color,
+            "current_player": self.current_player_index,
+            "direction": self.game_direction,
+            "players": [p.to_dict() for p in self.players],
+            "last_action": self.last_action,
+            "game_over": self.game_over,
+            "winner": self.winner.name if self.winner else None
+        }
 
-            card_index = int(choice)
-            card_to_play = current_player.hand[card_index]
-            
-            chosen_color = None
-            if card_to_play.color == "Wild":
-                while chosen_color not in ["Red", "Green", "Blue", "Yellow"]:
-                    chosen_color = input("Choose color (Red, Green, Blue, Yellow): ").capitalize()
+        # Include specific player's hand
+        if for_player_id is not None and 0 <= for_player_id < len(self.players):
+            player = self.players[for_player_id]
+            state["your_hand"] = [card.to_dict() for card in player.hand]
 
-            game.play_card(current_player, card_index, chosen_color)
+        return state
 
-        except (ValueError, IndexError):
-            print("Invalid input.")
-        except KeyboardInterrupt:
-            sys.exit()
+    # ==================== HELPER METHODS ====================
+    def get_playable_cards(self, player_id):
+        """
+        Get indices of cards that can be played
+        Returns: [0, 2, 5] ← These card positions are playable
+        """
+        player = self.players[player_id]
+        return [i for i, card in enumerate(player.hand) if self.is_valid_play(card)]
+
+
+
